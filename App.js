@@ -263,6 +263,10 @@ export default function App() {
         </View>
       </ScrollView>
       
+      <View style={styles.poweredByContainer}>
+        <Text style={[styles.poweredByText, { color: themeStyles.secondaryTextColor }]}>Powered by Dynamic.IO</Text>
+      </View>
+      
       <Modal
         animationType="slide"
         transparent={true}
@@ -483,5 +487,17 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  poweredByContainer: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 30 : 10,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  poweredByText: {
+    fontSize: 12,
+    opacity: 0.7,
   },
 });

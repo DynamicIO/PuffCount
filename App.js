@@ -1,9 +1,80 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, SafeAreaView, Platform, StatusBar, Animated, Modal, Switch, Dimensions } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, SafeAreaView, Platform, StatusBar, Animated, Modal, Switch, Dimensions, Linking } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { LineChart, BarChart } from 'react-native-chart-kit';
 
 const { width } = Dimensions.get('window');
+
+// Skeleton Loading Component
+const SkeletonLoader = ({ isDarkMode }) => {
+  const [fadeAnim] = useState(new Animated.Value(0.3));
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 0.3,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
+
+  const skeletonColor = isDarkMode ? '#2a2a2a' : '#e0e0e0';
+
+  return (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: isDarkMode ? '#0a0a0a' : '#f8f9fa' }]}>
+      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+      <ScrollView style={{ flex: 1, backgroundColor: isDarkMode ? '#0a0a0a' : '#f8f9fa' }}>
+        {/* Header Skeleton */}
+        <View style={{ padding: 20 }}>
+          <Animated.View style={[styles.skeletonBox, { opacity: fadeAnim, backgroundColor: skeletonColor, height: 30, width: 150, marginBottom: 10 }]} />
+          <Animated.View style={[styles.skeletonBox, { opacity: fadeAnim, backgroundColor: skeletonColor, height: 20, width: 200 }]} />
+        </View>
+
+        {/* Stats Cards Skeleton */}
+        <View style={styles.statsContainer}>
+          {[1, 2, 3].map((i) => (
+            <Animated.View key={i} style={[styles.statCard, { opacity: fadeAnim, backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
+              <View style={[styles.skeletonBox, { backgroundColor: skeletonColor, height: 24, width: '60%', marginBottom: 5, alignSelf: 'center' }]} />
+              <View style={[styles.skeletonBox, { backgroundColor: skeletonColor, height: 12, width: '80%', marginTop: 5, alignSelf: 'center' }]} />
+            </Animated.View>
+          ))}
+        </View>
+
+        {/* Calendar Skeleton */}
+        <Animated.View style={[styles.calendarCard, { opacity: fadeAnim, backgroundColor: isDarkMode ? '#1a1a1a' : '#fff', height: 350 }]}>
+          <View style={[styles.skeletonBox, { backgroundColor: skeletonColor, height: 20, width: '60%', marginBottom: 20, alignSelf: 'center' }]} />
+          {[1, 2, 3, 4].map((i) => (
+            <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 15 }}>
+              {[1, 2, 3, 4, 5, 6, 7].map((j) => (
+                <View key={j} style={[styles.skeletonBox, { backgroundColor: skeletonColor, height: 30, width: 30, borderRadius: 15 }]} />
+              ))}
+            </View>
+          ))}
+        </Animated.View>
+
+        {/* Counter Card Skeleton */}
+        <Animated.View style={[styles.counterCard, { opacity: fadeAnim, backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
+          <View style={[styles.skeletonBox, { backgroundColor: skeletonColor, height: 140, width: 140, borderRadius: 70, alignSelf: 'center', marginBottom: 20 }]} />
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <View style={[styles.skeletonBox, { backgroundColor: skeletonColor, height: 50, flex: 1, borderRadius: 12 }]} />
+            <View style={[styles.skeletonBox, { backgroundColor: skeletonColor, height: 50, flex: 1, borderRadius: 12 }]} />
+          </View>
+        </Animated.View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
 
 const formatDate = (dateString) => {
   const [year, month, day] = dateString.split('-');
@@ -49,6 +120,7 @@ const ProgressCircle = ({ count, isDarkMode, dailyGoal }) => {
 
 export default function App() {
   const [puffData, setPuffData] = useState({});
+  const [puffTimestamps, setPuffTimestamps] = useState({}); // New: track timestamps for each puff
   const [selectedDate, setSelectedDate] = useState('');
   const [puffCount, setPuffCount] = useState(0);
   const [buttonScale] = useState(new Animated.Value(1));
@@ -63,6 +135,8 @@ export default function App() {
   const [showAchievement, setShowAchievement] = useState(false);
   const [newAchievement, setNewAchievement] = useState(null);
   const [goalModalVisible, setGoalModalVisible] = useState(false);
+  const [chartsModalVisible, setChartsModalVisible] = useState(false);
+  const [timeOfDayModalVisible, setTimeOfDayModalVisible] = useState(false);
   
   // Loading screen states
   const [isLoading, setIsLoading] = useState(true);
@@ -132,6 +206,7 @@ export default function App() {
       })
     ).start();
   };
+
 
   const loadThemePreference = async () => {
     try {
@@ -210,9 +285,16 @@ export default function App() {
   const loadPuffData = async () => {
     try {
       const savedData = await AsyncStorage.getItem('puffData');
+      const savedTimestamps = await AsyncStorage.getItem('puffTimestamps');
+      
       if (savedData) {
         const data = JSON.parse(savedData);
         setPuffData(data);
+        
+        // Load timestamps
+        if (savedTimestamps) {
+          setPuffTimestamps(JSON.parse(savedTimestamps));
+        }
         
         // Set initial puff count for today if it exists
         const today = new Date().toISOString().split('T')[0];
@@ -232,7 +314,9 @@ export default function App() {
     }
   };
 
-  const handleDateSelect = (date) => {
+  const handleDateSelect = async (date) => {
+    // Haptic feedback on date selection
+    await Haptics.selectionAsync();
     setSelectedDate(date.dateString);
     setPuffCount(puffData[date.dateString] || 0);
   };
@@ -267,6 +351,8 @@ export default function App() {
   };
 
   const incrementPuff = async () => {
+    // Haptic feedback
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     animateButton();
     const newCount = puffCount + 1;
     setPuffCount(newCount);
@@ -274,7 +360,18 @@ export default function App() {
     try {
       const updatedPuffData = { ...puffData, [selectedDate]: newCount };
       setPuffData(updatedPuffData);
+      
+      // Save timestamp for time-of-day tracking
+      const currentTime = new Date().toISOString();
+      const updatedTimestamps = { ...puffTimestamps };
+      if (!updatedTimestamps[selectedDate]) {
+        updatedTimestamps[selectedDate] = [];
+      }
+      updatedTimestamps[selectedDate].push(currentTime);
+      setPuffTimestamps(updatedTimestamps);
+      
       await AsyncStorage.setItem('puffData', JSON.stringify(updatedPuffData));
+      await AsyncStorage.setItem('puffTimestamps', JSON.stringify(updatedTimestamps));
       await checkAndUnlockAchievements(newCount);
     } catch (error) {
       console.error('Error saving puff data:', error);
@@ -283,6 +380,8 @@ export default function App() {
 
   const decrementPuff = async () => {
     if (puffCount > 0) {
+      // Haptic feedback
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       animateButton();
       const newCount = puffCount - 1;
       setPuffCount(newCount);
@@ -295,6 +394,18 @@ export default function App() {
           updatedPuffData[selectedDate] = newCount;
         }
         setPuffData(updatedPuffData);
+        
+        // Remove last timestamp
+        const updatedTimestamps = { ...puffTimestamps };
+        if (updatedTimestamps[selectedDate] && updatedTimestamps[selectedDate].length > 0) {
+          updatedTimestamps[selectedDate].pop();
+          if (updatedTimestamps[selectedDate].length === 0) {
+            delete updatedTimestamps[selectedDate];
+          }
+          setPuffTimestamps(updatedTimestamps);
+          await AsyncStorage.setItem('puffTimestamps', JSON.stringify(updatedTimestamps));
+        }
+        
         await AsyncStorage.setItem('puffData', JSON.stringify(updatedPuffData));
       } catch (error) {
         console.error('Error saving puff data:', error);
@@ -306,14 +417,38 @@ export default function App() {
     const marked = {};
     Object.keys(puffData).forEach(date => {
       const count = puffData[date];
-      let dotColor = '#4ecdc4'; // blue/green
-      if (count > dailyGoal * 1.5) dotColor = '#ff6b6b'; // red
-      else if (count > dailyGoal) dotColor = '#ffa726'; // yellow
+      
+      // Heatmap-style color intensity based on count
+      let dotColor = '#4ecdc4';
+      let backgroundColor = 'transparent';
+      
+      if (count <= dailyGoal * 0.5) {
+        // Very low - light green
+        dotColor = '#4ecdc4';
+        backgroundColor = isDarkMode ? 'rgba(78, 205, 196, 0.1)' : 'rgba(78, 205, 196, 0.15)';
+      } else if (count <= dailyGoal) {
+        // Low - green
+        dotColor = '#4ecdc4';
+        backgroundColor = isDarkMode ? 'rgba(78, 205, 196, 0.3)' : 'rgba(78, 205, 196, 0.35)';
+      } else if (count <= dailyGoal * 1.5) {
+        // Medium - orange
+        dotColor = '#ffa726';
+        backgroundColor = isDarkMode ? 'rgba(255, 167, 38, 0.3)' : 'rgba(255, 167, 38, 0.35)';
+      } else {
+        // High - red
+        dotColor = '#ff6b6b';
+        backgroundColor = isDarkMode ? 'rgba(255, 107, 107, 0.3)' : 'rgba(255, 107, 107, 0.35)';
+      }
       
       marked[date] = {
         marked: true,
-        dotColor: isDarkMode ? dotColor : dotColor,
-        text: `${count} puffs`
+        dotColor,
+        customStyles: {
+          container: {
+            backgroundColor,
+            borderRadius: 16,
+          },
+        },
       };
     });
     
@@ -514,6 +649,165 @@ export default function App() {
     outputRange: ['0deg', '360deg']
   });
 
+  const openDynamicIO = () => {
+    Linking.openURL('https://dynamicio.vercel.app/');
+  };
+
+  // Get data for weekly chart
+  const getWeeklyChartData = () => {
+    if (!selectedDate) return { labels: [], datasets: [{ data: [0] }] };
+    
+    const [year, month, day] = selectedDate.split('-');
+    const currentDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    const dayOfWeek = currentDate.getDay();
+    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const monday = new Date(currentDate);
+    monday.setDate(currentDate.getDate() - daysFromMonday);
+    
+    const labels = [];
+    const data = [];
+    
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + i);
+      const dateString = date.toISOString().split('T')[0];
+      labels.push(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()]);
+      data.push(puffData[dateString] || 0);
+    }
+    
+    return {
+      labels,
+      datasets: [{ data: data.length > 0 ? data : [0] }]
+    };
+  };
+
+  // Get data for monthly chart
+  const getMonthlyChartData = () => {
+    if (!selectedDate) return { labels: [], datasets: [{ data: [0] }] };
+    
+    const [year, month] = selectedDate.split('-');
+    const monthKey = `${year}-${month}`;
+    const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+    
+    const labels = [];
+    const data = [];
+    const step = Math.ceil(daysInMonth / 7);
+    
+    for (let day = 1; day <= daysInMonth; day += step) {
+      const dateString = `${year}-${month}-${day.toString().padStart(2, '0')}`;
+      labels.push(day.toString());
+      data.push(puffData[dateString] || 0);
+    }
+    
+    return {
+      labels,
+      datasets: [{ data: data.length > 0 ? data : [0] }]
+    };
+  };
+
+  // Get time-of-day distribution data
+  const getTimeOfDayData = () => {
+    const hourCounts = Array(24).fill(0);
+    
+    Object.entries(puffTimestamps).forEach(([date, timestamps]) => {
+      timestamps.forEach(timestamp => {
+        const hour = new Date(timestamp).getHours();
+        hourCounts[hour]++;
+      });
+    });
+
+    const labels = [];
+    const data = [];
+    for (let i = 0; i < 24; i += 3) {
+      labels.push(`${i}:00`);
+      data.push(hourCounts[i] + hourCounts[i+1] + hourCounts[i+2]);
+    }
+
+    return {
+      labels,
+      datasets: [{ data: data.some(d => d > 0) ? data : [0] }]
+    };
+  };
+
+  // Get peak usage hour
+  const getPeakUsageHour = () => {
+    const hourCounts = Array(24).fill(0);
+    
+    Object.entries(puffTimestamps).forEach(([date, timestamps]) => {
+      timestamps.forEach(timestamp => {
+        const hour = new Date(timestamp).getHours();
+        hourCounts[hour]++;
+      });
+    });
+
+    const maxCount = Math.max(...hourCounts);
+    const peakHour = hourCounts.indexOf(maxCount);
+    
+    if (maxCount === 0) return 'No data';
+    
+    const period = peakHour >= 12 ? 'PM' : 'AM';
+    const displayHour = peakHour % 12 || 12;
+    return `${displayHour}:00 ${period}`;
+  };
+
+  // Calculate weekly improvement percentage
+  const getWeeklyImprovement = () => {
+    if (!selectedDate) return 0;
+    
+    const [year, month, day] = selectedDate.split('-');
+    const currentDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    
+    // Current week (last 7 days)
+    let currentWeekTotal = 0;
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(currentDate);
+      date.setDate(currentDate.getDate() - i);
+      const dateString = date.toISOString().split('T')[0];
+      currentWeekTotal += puffData[dateString] || 0;
+    }
+    
+    // Previous week (days 7-13 ago)
+    let previousWeekTotal = 0;
+    for (let i = 7; i < 14; i++) {
+      const date = new Date(currentDate);
+      date.setDate(currentDate.getDate() - i);
+      const dateString = date.toISOString().split('T')[0];
+      previousWeekTotal += puffData[dateString] || 0;
+    }
+    
+    if (previousWeekTotal === 0) return 0;
+    
+    const improvement = ((previousWeekTotal - currentWeekTotal) / previousWeekTotal) * 100;
+    return Math.round(improvement);
+  };
+
+  // Get most active time period
+  const getMostActiveTimePeriod = () => {
+    const periods = {
+      'Morning (6-12)': 0,
+      'Afternoon (12-18)': 0,
+      'Evening (18-24)': 0,
+      'Night (0-6)': 0
+    };
+    
+    Object.entries(puffTimestamps).forEach(([date, timestamps]) => {
+      timestamps.forEach(timestamp => {
+        const hour = new Date(timestamp).getHours();
+        if (hour >= 6 && hour < 12) periods['Morning (6-12)']++;
+        else if (hour >= 12 && hour < 18) periods['Afternoon (12-18)']++;
+        else if (hour >= 18 && hour < 24) periods['Evening (18-24)']++;
+        else periods['Night (0-6)']++;
+      });
+    });
+
+    const maxPeriod = Object.entries(periods).reduce((max, [period, count]) => 
+      count > max.count ? { period, count } : max, 
+      { period: 'No data', count: 0 }
+    );
+
+    return maxPeriod.period;
+  };
+
   // Show loading screen
   if (isLoading) {
     return (
@@ -556,6 +850,17 @@ export default function App() {
             <View style={[styles.loadingDot, { backgroundColor: '#4ecdc4' }]} />
           </View>
         </Animated.View>
+        
+        {/* Powered by Dynamic.IO */}
+        <TouchableOpacity 
+          style={styles.poweredByContainer}
+          onPress={openDynamicIO}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.poweredByText, { color: isDarkMode ? '#b0b0b0' : '#6c757d' }]}>
+            Powered by <Text style={{ color: '#4ecdc4' }}>Dynamic.IO</Text>
+          </Text>
+        </TouchableOpacity>
       </Animated.View>
     );
   }
@@ -588,23 +893,32 @@ export default function App() {
           </View>
         </View>
 
-                 {/* Enhanced Stats Cards */}
+                 {/* Enhanced Stats Cards with Gradients */}
          <View style={styles.statsContainer}>
-           <View style={[styles.statCard, { backgroundColor: themeStyles.cardBackground }]}>
+           <LinearGradient
+             colors={isDarkMode ? ['#1a1a1a', '#252525'] : ['#ffffff', '#f5f5f5']}
+             style={styles.statCard}
+           >
              <Text style={[styles.statNumber, { color: themeStyles.accentColor }]}>{getDailyAverage()}</Text>
              <Text style={[styles.statLabel, { color: themeStyles.secondaryTextColor }]}>Daily Avg</Text>
              <Text style={[styles.statSubLabel, { color: themeStyles.secondaryTextColor }]}>All Time</Text>
-           </View>
-           <View style={[styles.statCard, { backgroundColor: themeStyles.cardBackground }]}>
+           </LinearGradient>
+           <LinearGradient
+             colors={isDarkMode ? ['#1a1a1a', '#252525'] : ['#ffffff', '#f5f5f5']}
+             style={styles.statCard}
+           >
              <Text style={[styles.statNumber, { color: '#ffa726' }]}>{getWeeklyAverage()}</Text>
              <Text style={[styles.statLabel, { color: themeStyles.secondaryTextColor }]}>Weekly Avg</Text>
              <Text style={[styles.statSubLabel, { color: themeStyles.secondaryTextColor }]}>Mon-Sun</Text>
-           </View>
-           <View style={[styles.statCard, { backgroundColor: themeStyles.cardBackground }]}>
+           </LinearGradient>
+           <LinearGradient
+             colors={isDarkMode ? ['#1a1a1a', '#252525'] : ['#ffffff', '#f5f5f5']}
+             style={styles.statCard}
+           >
              <Text style={[styles.statNumber, { color: '#ff6b6b' }]}>{getMonthlyAverage()}</Text>
              <Text style={[styles.statLabel, { color: themeStyles.secondaryTextColor }]}>Monthly Avg</Text>
              <Text style={[styles.statSubLabel, { color: themeStyles.secondaryTextColor }]}>Per Day</Text>
-           </View>
+           </LinearGradient>
          </View>
 
          {/* Cost & Goal Info */}
@@ -730,7 +1044,94 @@ export default function App() {
               View Monthly Report
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.monthlyButton, { 
+              backgroundColor: themeStyles.accentColor,
+              borderColor: themeStyles.accentColor,
+              shadowColor: themeStyles.shadowColor,
+              marginTop: 10
+            }]} 
+            onPress={() => setChartsModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.monthlyButtonIcon, { fontSize: 18 }]}>📈</Text>
+            <Text style={[styles.monthlyButtonText, { color: '#ffffff' }]}>
+              View Trend Charts
+            </Text>
+          </TouchableOpacity>
         </View>
+
+        {/* Dynamic Insights Card */}
+        <LinearGradient
+          colors={isDarkMode ? ['#1a1a1a', '#2a2a2a'] : ['#f0f9ff', '#e0f2fe']}
+          style={styles.insightsCardMain}
+        >
+          <View style={styles.insightsHeader}>
+            <Text style={[styles.insightsMainTitle, { color: themeStyles.accentColor }]}>
+              💡 Your Insights
+            </Text>
+            <TouchableOpacity 
+              onPress={() => setTimeOfDayModalVisible(true)}
+              style={[styles.timeOfDayButton, { backgroundColor: themeStyles.accentColor }]}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '600' }}>⏰ Time Analysis</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {(() => {
+            const improvement = getWeeklyImprovement();
+            const isImprovement = improvement > 0;
+            const peakHour = getPeakUsageHour();
+            
+            return (
+              <View>
+                <View style={styles.insightRow}>
+                  <Text style={[styles.insightIcon, { fontSize: 32 }]}>
+                    {isImprovement ? '📉' : improvement < 0 ? '📈' : '➖'}
+                  </Text>
+                  <View style={styles.insightTextContainer}>
+                    <Text style={[styles.insightMainText, { color: themeStyles.textColor }]}>
+                      {isImprovement 
+                        ? `Great! You've reduced usage by ${improvement}% this week!` 
+                        : improvement < 0
+                        ? `Usage increased by ${Math.abs(improvement)}% this week`
+                        : 'Keep tracking to see your progress'}
+                    </Text>
+                    <Text style={[styles.insightSubText, { color: themeStyles.secondaryTextColor }]}>
+                      Compared to last week
+                    </Text>
+                  </View>
+                </View>
+                
+                {peakHour !== 'No data' && (
+                  <View style={[styles.insightRow, { marginTop: 15 }]}>
+                    <Text style={[styles.insightIcon, { fontSize: 24 }]}>⏰</Text>
+                    <View style={styles.insightTextContainer}>
+                      <Text style={[styles.insightMainText, { color: themeStyles.textColor, fontSize: 14 }]}>
+                        Peak usage: {peakHour}
+                      </Text>
+                      <Text style={[styles.insightSubText, { color: themeStyles.secondaryTextColor }]}>
+                        Most active: {getMostActiveTimePeriod()}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            );
+          })()}
+        </LinearGradient>
+        
+        {/* Powered by Dynamic.IO */}
+        <TouchableOpacity 
+          style={styles.appFooterContainer}
+          onPress={openDynamicIO}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.poweredByText, { color: themeStyles.secondaryTextColor }]}>
+            Powered by <Text style={{ color: '#4ecdc4' }}>Dynamic.IO</Text>
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
       
       {/* Enhanced Modal */}
@@ -914,6 +1315,219 @@ export default function App() {
           </View>
         </Animated.View>
       )}
+
+      {/* Trend Charts Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={chartsModalVisible}
+        onRequestClose={() => setChartsModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={[styles.modalContent, { backgroundColor: themeStyles.modalBackground, maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: themeStyles.accentColor }]}>
+                📈 Trend Analysis
+              </Text>
+              <TouchableOpacity onPress={() => setChartsModalVisible(false)}>
+                <Text style={[styles.closeIconText, { color: themeStyles.secondaryTextColor }]}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={{ width: '100%' }} showsVerticalScrollIndicator={false}>
+              {/* Weekly Trend */}
+              <View style={{ marginBottom: 30 }}>
+                <Text style={[styles.chartTitle, { color: themeStyles.textColor }]}>Weekly Trend</Text>
+                <Text style={[styles.chartSubtitle, { color: themeStyles.secondaryTextColor }]}>
+                  Last 7 days usage pattern
+                </Text>
+                <LineChart
+                  data={getWeeklyChartData()}
+                  width={width * 0.85}
+                  height={220}
+                  chartConfig={{
+                    backgroundColor: themeStyles.cardBackground,
+                    backgroundGradientFrom: isDarkMode ? '#1a1a1a' : '#ffffff',
+                    backgroundGradientTo: isDarkMode ? '#2a2a2a' : '#f5f5f5',
+                    decimalPlaces: 0,
+                    color: (opacity = 1) => `rgba(78, 205, 196, ${opacity})`,
+                    labelColor: (opacity = 1) => isDarkMode ? `rgba(255, 255, 255, ${opacity})` : `rgba(0, 0, 0, ${opacity})`,
+                    style: {
+                      borderRadius: 16
+                    },
+                    propsForDots: {
+                      r: '6',
+                      strokeWidth: '2',
+                      stroke: '#4ecdc4'
+                    }
+                  }}
+                  bezier
+                  style={{
+                    marginVertical: 8,
+                    borderRadius: 16
+                  }}
+                />
+              </View>
+
+              {/* Monthly Trend */}
+              <View style={{ marginBottom: 20 }}>
+                <Text style={[styles.chartTitle, { color: themeStyles.textColor }]}>Monthly Overview</Text>
+                <Text style={[styles.chartSubtitle, { color: themeStyles.secondaryTextColor }]}>
+                  Current month comparison
+                </Text>
+                <BarChart
+                  data={getMonthlyChartData()}
+                  width={width * 0.85}
+                  height={220}
+                  chartConfig={{
+                    backgroundColor: themeStyles.cardBackground,
+                    backgroundGradientFrom: isDarkMode ? '#1a1a1a' : '#ffffff',
+                    backgroundGradientTo: isDarkMode ? '#2a2a2a' : '#f5f5f5',
+                    decimalPlaces: 0,
+                    color: (opacity = 1) => `rgba(78, 205, 196, ${opacity})`,
+                    labelColor: (opacity = 1) => isDarkMode ? `rgba(255, 255, 255, ${opacity})` : `rgba(0, 0, 0, ${opacity})`,
+                    style: {
+                      borderRadius: 16
+                    }
+                  }}
+                  style={{
+                    marginVertical: 8,
+                    borderRadius: 16
+                  }}
+                  showValuesOnTopOfBars
+                />
+              </View>
+
+              {/* Insights Section */}
+              <LinearGradient
+                colors={isDarkMode ? ['#1a1a1a', '#252525'] : ['#f0f9ff', '#e0f2fe']}
+                style={styles.insightsCard}
+              >
+                <Text style={[styles.insightsTitle, { color: themeStyles.accentColor }]}>💡 Insights</Text>
+                <Text style={[styles.insightsText, { color: themeStyles.textColor }]}>
+                  • Daily Average: {getDailyAverage()} puffs{'\n'}
+                  • Weekly Average: {getWeeklyAverage()} puffs{'\n'}
+                  • Monthly Total: {getMonthlyTotal()} puffs{'\n'}
+                  • Current Streak: {getCurrentStreak()} days under goal
+                </Text>
+              </LinearGradient>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Time-of-Day Analysis Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={timeOfDayModalVisible}
+        onRequestClose={() => setTimeOfDayModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={[styles.modalContent, { backgroundColor: themeStyles.modalBackground, maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: themeStyles.accentColor }]}>
+                ⏰ Time-of-Day Analysis
+              </Text>
+              <TouchableOpacity onPress={() => setTimeOfDayModalVisible(false)}>
+                <Text style={[styles.closeIconText, { color: themeStyles.secondaryTextColor }]}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={{ width: '100%' }} showsVerticalScrollIndicator={false}>
+              {/* Usage by Time Chart */}
+              <View style={{ marginBottom: 20 }}>
+                <Text style={[styles.chartTitle, { color: themeStyles.textColor }]}>Usage by Time of Day</Text>
+                <Text style={[styles.chartSubtitle, { color: themeStyles.secondaryTextColor }]}>
+                  When you use most throughout the day
+                </Text>
+                <BarChart
+                  data={getTimeOfDayData()}
+                  width={width * 0.85}
+                  height={220}
+                  chartConfig={{
+                    backgroundColor: themeStyles.cardBackground,
+                    backgroundGradientFrom: isDarkMode ? '#1a1a1a' : '#ffffff',
+                    backgroundGradientTo: isDarkMode ? '#2a2a2a' : '#f5f5f5',
+                    decimalPlaces: 0,
+                    color: (opacity = 1) => `rgba(255, 167, 38, ${opacity})`,
+                    labelColor: (opacity = 1) => isDarkMode ? `rgba(255, 255, 255, ${opacity})` : `rgba(0, 0, 0, ${opacity})`,
+                    style: {
+                      borderRadius: 16
+                    }
+                  }}
+                  style={{
+                    marginVertical: 8,
+                    borderRadius: 16
+                  }}
+                  showValuesOnTopOfBars
+                />
+              </View>
+
+              {/* Time Period Breakdown */}
+              <LinearGradient
+                colors={isDarkMode ? ['#1a1a1a', '#252525'] : ['#fff5e6', '#ffe6cc']}
+                style={styles.timePeriodCard}
+              >
+                <Text style={[styles.insightsTitle, { color: '#ffa726' }]}>⏰ Time Breakdown</Text>
+                
+                {(() => {
+                  const periods = {
+                    '🌅 Morning (6AM-12PM)': 0,
+                    '☀️ Afternoon (12PM-6PM)': 0,
+                    '🌆 Evening (6PM-12AM)': 0,
+                    '🌙 Night (12AM-6AM)': 0
+                  };
+                  
+                  Object.entries(puffTimestamps).forEach(([date, timestamps]) => {
+                    timestamps.forEach(timestamp => {
+                      const hour = new Date(timestamp).getHours();
+                      if (hour >= 6 && hour < 12) periods['🌅 Morning (6AM-12PM)']++;
+                      else if (hour >= 12 && hour < 18) periods['☀️ Afternoon (12PM-6PM)']++;
+                      else if (hour >= 18 && hour < 24) periods['🌆 Evening (6PM-12AM)']++;
+                      else periods['🌙 Night (12AM-6AM)']++;
+                    });
+                  });
+
+                  const total = Object.values(periods).reduce((sum, count) => sum + count, 0);
+
+                  return (
+                    <View>
+                      {Object.entries(periods).map(([period, count]) => {
+                        const percentage = total > 0 ? Math.round((count / total) * 100) : 0;
+                        return (
+                          <View key={period} style={styles.timePeriodRow}>
+                            <Text style={[styles.timePeriodLabel, { color: themeStyles.textColor }]}>
+                              {period}
+                            </Text>
+                            <View style={styles.timePeriodBar}>
+                              <View style={[styles.progressBar, { backgroundColor: themeStyles.borderColor }]}>
+                                <View style={[styles.progressBarFill, { 
+                                  width: `${percentage}%`,
+                                  backgroundColor: '#ffa726'
+                                }]} />
+                              </View>
+                              <Text style={[styles.timePeriodValue, { color: themeStyles.textColor }]}>
+                                {count} ({percentage}%)
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                      
+                      <View style={[styles.peakTimeCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff', marginTop: 15 }]}>
+                        <Text style={[styles.peakTimeText, { color: themeStyles.textColor }]}>
+                          🎯 Peak Hour: <Text style={{ color: '#ffa726', fontWeight: 'bold' }}>{getPeakUsageHour()}</Text>
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()}
+              </LinearGradient>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -928,7 +1542,7 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     padding: 20,
-    paddingTop: 0,
+    paddingTop: 20,
   },
   headerContent: {
     flexDirection: 'row',
@@ -1463,10 +2077,191 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  appFooterContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingBottom: 20,
+  },
+  poweredByText: {
+    fontSize: 14,
+    fontWeight: '500',
+    opacity: 0.7,
+    letterSpacing: 0.5,
+  },
+  skeletonBox: {
+    borderRadius: 8,
+  },
+  chartTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    marginTop: 10,
+    paddingHorizontal: 10,
+  },
+  chartSubtitle: {
+    fontSize: 14,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+  },
+  insightsCard: {
+    padding: 20,
+    borderRadius: 16,
+    marginBottom: 20,
+    marginHorizontal: 10,
+  },
+  insightsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  insightsText: {
+    fontSize: 14,
+    lineHeight: 24,
+  },
+  insightsCardMain: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  insightsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  insightsMainTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  timeOfDayButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  insightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  insightIcon: {
+    marginRight: 12,
+  },
+  insightTextContainer: {
+    flex: 1,
+  },
+  insightMainText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  insightSubText: {
+    fontSize: 13,
+    opacity: 0.8,
+  },
+  timePeriodCard: {
+    padding: 20,
+    borderRadius: 16,
+    marginBottom: 20,
+    marginHorizontal: 10,
+  },
+  timePeriodRow: {
+    marginBottom: 15,
+  },
+  timePeriodLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  timePeriodBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  timePeriodValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    minWidth: 70,
+  },
+  peakTimeCard: {
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  peakTimeText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  // Loading Screen Styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 47 : StatusBar.currentHeight,
+  },
+  loadingContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingLogoCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 30,
+    shadowColor: '#4ecdc4',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
+    elevation: 10,
+  },
+  loadingLogoInner: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(78, 205, 196, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingEmoji: {
+    fontSize: 48,
+  },
+  loadingTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+  loadingSubtitle: {
+    fontSize: 16,
+    marginBottom: 30,
+    opacity: 0.8,
+  },
+  loadingDotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
   loadingDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     opacity: 0.6,
+  },
+  poweredByContainer: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

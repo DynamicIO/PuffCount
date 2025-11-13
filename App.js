@@ -63,13 +63,75 @@ export default function App() {
   const [showAchievement, setShowAchievement] = useState(false);
   const [newAchievement, setNewAchievement] = useState(null);
   const [goalModalVisible, setGoalModalVisible] = useState(false);
+  
+  // Loading screen states
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingFadeAnim] = useState(new Animated.Value(1));
+  const [loadingScaleAnim] = useState(new Animated.Value(0.8));
+  const [loadingRotateAnim] = useState(new Animated.Value(0));
 
   useEffect(() => {
-    loadPuffData();
-    loadThemePreference();
-    loadUserSettings();
-    loadAchievements();
+    initializeApp();
   }, []);
+
+  const initializeApp = async () => {
+    // Start animations
+    startLoadingAnimation();
+    
+    // Load all app data
+    await Promise.all([
+      loadPuffData(),
+      loadThemePreference(),
+      loadUserSettings(),
+      loadAchievements()
+    ]);
+    
+    // Minimum loading time for better UX (5 seconds)
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Fade out loading screen
+    Animated.parallel([
+      Animated.timing(loadingFadeAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(loadingScaleAnim, {
+        toValue: 1.2,
+        duration: 500,
+        useNativeDriver: true,
+      })
+    ]).start(() => {
+      setIsLoading(false);
+    });
+  };
+
+  const startLoadingAnimation = () => {
+    // Scale pulse animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(loadingScaleAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(loadingScaleAnim, {
+          toValue: 0.8,
+          duration: 800,
+          useNativeDriver: true,
+        })
+      ])
+    ).start();
+
+    // Rotation animation
+    Animated.loop(
+      Animated.timing(loadingRotateAnim, {
+        toValue: 1,
+        duration: 2000,
+        useNativeDriver: true,
+      })
+    ).start();
+  };
 
   const loadThemePreference = async () => {
     try {
@@ -446,6 +508,57 @@ export default function App() {
     modalBackground: isDarkMode ? '#1a1a1a' : '#ffffff',
     shadowColor: isDarkMode ? '#000' : '#00000015',
   };
+
+  const spin = loadingRotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg']
+  });
+
+  // Show loading screen
+  if (isLoading) {
+    return (
+      <Animated.View style={[styles.loadingContainer, { 
+        backgroundColor: isDarkMode ? '#0a0a0a' : '#f8f9fa',
+        opacity: loadingFadeAnim 
+      }]}>
+        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={isDarkMode ? '#0a0a0a' : '#f8f9fa'} />
+        <Animated.View style={[
+          styles.loadingContent,
+          { transform: [{ scale: loadingScaleAnim }] }
+        ]}>
+          {/* Animated Logo Circle */}
+          <Animated.View style={[
+            styles.loadingLogoCircle,
+            { 
+              borderColor: '#4ecdc4',
+              transform: [{ rotate: spin }]
+            }
+          ]}>
+            <View style={styles.loadingLogoInner}>
+              <Text style={styles.loadingEmoji}>💨</Text>
+            </View>
+          </Animated.View>
+          
+          {/* App Title */}
+          <Text style={[styles.loadingTitle, { color: '#4ecdc4' }]}>
+            Puff Tracker
+          </Text>
+          
+          {/* Subtitle */}
+          <Text style={[styles.loadingSubtitle, { color: isDarkMode ? '#b0b0b0' : '#6c757d' }]}>
+            Loading your data...
+          </Text>
+          
+          {/* Loading Dots Animation */}
+          <View style={styles.loadingDotsContainer}>
+            <View style={[styles.loadingDot, { backgroundColor: '#4ecdc4' }]} />
+            <View style={[styles.loadingDot, { backgroundColor: '#4ecdc4' }]} />
+            <View style={[styles.loadingDot, { backgroundColor: '#4ecdc4' }]} />
+          </View>
+        </Animated.View>
+      </Animated.View>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: themeStyles.backgroundColor }]}>
@@ -1296,5 +1409,64 @@ const styles = StyleSheet.create({
   achievementNotificationDesc: {
     fontSize: 14,
     opacity: 0.9,
+  },
+  // Loading Screen Styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 47 : StatusBar.currentHeight,
+  },
+  loadingContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingLogoCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 30,
+    shadowColor: '#4ecdc4',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
+    elevation: 10,
+  },
+  loadingLogoInner: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(78, 205, 196, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingEmoji: {
+    fontSize: 48,
+  },
+  loadingTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+  loadingSubtitle: {
+    fontSize: 16,
+    marginBottom: 30,
+    opacity: 0.8,
+  },
+  loadingDotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  loadingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    opacity: 0.6,
   },
 });
